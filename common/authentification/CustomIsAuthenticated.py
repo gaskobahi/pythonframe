@@ -45,7 +45,7 @@ class CustomIsAuthenticated(BasePermission):
 
         # Check if the token is blacklisted
         if BlacklistedToken.is_token_blacklisted(token):
-            raise AuthenticationFailed("Le token est déjà blacklisté.")
+            raise AuthenticationFailed("Le token est déjà blacklisté..")
 
         # Validate user existence
         try:
