@@ -1,0 +1,14 @@
+djano 
+djangorestframework # type: ignore
+environs
+
+create a new project 
+== python3 -m django-admin startproject firstapi
+python manage.py startapp customers
+process to create api
+--models-serializer--views---urls
+--migrations (apres un changement dans le models ,faire la migration)
+python3 manage.py makemigrations
+pip install django-filter
+
+logger4js

@@ -1,0 +1,3 @@
+python manage.py create_default_role
+python manage.py create_default_user
+python manage.py assign_role_to_user admin Administrator
