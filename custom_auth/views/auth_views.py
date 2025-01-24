@@ -13,8 +13,8 @@ class LoginView(APIView):
     authentication_classes = [LocalAuthGuard]
     def post(self, request):
         try:
-            authService=AuthService(request)
-            return authService.ConfirmLogin(getattr(request,settings.REQUEST_AUTH_USER_KEY,None))
+            authService=AuthService()
+            return authService.ConfirmLogin(getattr(request,settings.REQUEST_AUTH_USER_KEY,None),getattr(request,settings.REQUEST_AUTH_LOG_KEY,None))
         except User.DoesNotExist:
             raise AuthenticationFailed('User not found') 
         except Exception as e:
@@ -30,8 +30,9 @@ class LoginView(APIView):
 class LogoutAPIView(APIView):
     permission_classes = [CustomIsAuthenticated]
     def post(self, request, *args, **kwargs):
-        authService=AuthService(request)
-        return authService.logout()
+        authService=AuthService()
+
+        return authService.logout(getattr(request,settings.REQUEST_AUTH_USER_KEY,None))
        
 
 

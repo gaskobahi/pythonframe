@@ -48,7 +48,7 @@ class AuthUser(BaseCoreEntity):
         return self.id is not None
     
     def __str__(self):
-        return self
+        return self.username
     
     
     class Meta:

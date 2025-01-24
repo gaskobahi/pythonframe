@@ -3,6 +3,7 @@ import json
 import uuid
 from django.conf import settings
 from rest_framework.response import Response
+from rest_framework.exceptions import AuthenticationFailed
 
 from custom_auth.models.auth_log import AuthLog
 from custom_auth.models.auth_user import AuthUser
@@ -11,6 +12,7 @@ from custom_auth.strategies.customTokens import CustomToken
 from user.models.user import User
 from rest_framework import status
 from rest_framework.exceptions import PermissionDenied
+from custom_auth.middleware.RequestMiddleware import get_current_request
 
 from user.serializers.user import UserSerializer
 
@@ -23,8 +25,9 @@ def custom_serializer(obj):
 
 
 class AuthService:
-    def __init__(self,request):
-        self.request=request
+    def __init__(self):
+
+        self.request=get_current_request()
     def validateUser(self,authUser):
         #authLog = this.request[REQUEST_AUTH_LOG_KEY] as AuthLog;
         authUser = json.loads(authUser)
@@ -39,11 +42,9 @@ class AuthService:
             authUser["userAgent"] = self.request.headers.get('User-Agent')
             authUser["ip_address"] = self.get_client_ip(self.request)
             #Check user status
-
             return authUser
   
-    def create_Auth_User_Form(self,userLogged:User):
-        authLog=getattr(self.request,settings.REQUEST_AUTH_LOG_KEY,None)
+    def create_Auth_User_Form(self,userLogged:User,authLog:AuthLog):
         application = self.request.META.get(settings.REQUEST_APP_KEY)  # Les headers HTTP sont en MAJUSCULES et préfixés par "HTTP_"
         #Create authUser
 
@@ -56,7 +57,7 @@ class AuthService:
             ip_address=self.get_client_ip(),
             user_data=userLogged,
             last_access_date=datetime.now(),
-            auth_log_id=str(authLog.id),
+            auth_log_id=authLog.id,
             user_id=userLogged.get('id')
         )
         return auth
@@ -74,47 +75,41 @@ class AuthService:
         )
         return auth_log
     
-    def ConfirmLogin(self,loggedUser):
-        authLog = getattr(self.request,settings.REQUEST_AUTH_LOG_KEY,None)
-        authUser =loggedUser or getattr(self.request,settings.REQUEST_AUTH_USER_KEY,None)
+    def ConfirmLogin(self,loggedUser,authLog):
+        authUser =loggedUser
         #Create authUser
         authUser.created_by_id = authUser.id
         authUser:AuthUser =self.save_and_return(authUser)
         # Update authUser
         authUser.updated_by_id = authUser.id
-        authUser =  authUser.save()
+        #authUser =  authUser.save()
+        authUser:AuthUser =self.save_and_return(authUser)
         #Reload auth user data
-        authUser=self.getCurrentUser(authUser) 
-
+        authUser=json.loads(self.getCurrentUser(authUser)) 
+        authUserSerial=AuthUserSerializer(authUser)
         #Update request auth data
         setattr(self.request,settings.REQUEST_AUTH_LOG_KEY,authLog) 
         setattr(self.request,settings.REQUEST_AUTH_USER_KEY,authUser)
   
-      
-        authUser =loggedUser or getattr(self.request,settings.REQUEST_AUTH_USER_KEY,None)
-
         refresh = CustomToken.for_user(self.request,authUser,authLog)
-        session = AuthUserSerializer(authUser)
-
-        #if authUser:
-            #UserService.checkAuthUser(session.data)
-
-        user = User.objects.get(id=authUser.user_data.get('id'))
-        #_user= UserSerializer(user)
+        session = authUser 
+        user = User.objects.get(id=authUser.get('user_id'))
+        _user= UserSerializer(user)
 
         # Update last authentication
-        user.last_access_id = authUser.id;
-        #setattr(self.request,settings.SIMPLE_JWT.get('USER_ID_CLAIM'),_user.data)
+        user.last_access_id = authUser.get('id')
+        setattr(self.request,settings.SIMPLE_JWT.get('USER_ID_CLAIM'),_user.data)
          
         user.save();
         return Response({
             #'refresh': str(refresh),
-            'session':session.data,
+            'session':session,
             'token':str(refresh)      
         }, status=status.HTTP_200_OK)
 
-    def logout(self):
-        authUser:AuthUser = AuthUser.objects.get(id=self.request.authUser.get('id'))
+    def logout(self,authUser):
+        print('trtrtr',authUser)
+        authUser:AuthUser = AuthUser.objects.get(id=authUser.get('id'))
         if authUser.hasId():
             authUser.is_active = False
             authUser.logout_at = datetime.now()
@@ -179,6 +174,8 @@ class AuthService:
         requestAuthUser:AuthUser = authUser or getattr(self.request,settings.REQUEST_AUTH_USER_KEY,None) 
         return self.to_auth_user(requestAuthUser)
     
+   
+
 
     def to_auth_user(self, user):
       # Fetch the user object from the database
@@ -188,26 +185,7 @@ class AuthService:
         # Return the serializer data as a dictionary
         return json.dumps(serializer.data, default=custom_serializer)
 
-    """
-    def changePassword(dto):
-        if dto.password != dto.confirmPassword:
-            raise PermissionDenied("Mot de passe de confirmation incorrect")
-
-        authUser = this.request[REQUEST_AUTH_USER_KEY] as AuthUser;
-
-        if not authUser:
-            raise PermissionDenied("Mot de passe de confirmation incorrect")
-        if not authUser.user:
-            raise PermissionDenied("Compte utilisateur introuvable")
-        authUser.user = self.check_password(
-        authUser.user,
-        dto.currentPassword,
-        dto.password,
-        );
-
-    return await this.logout();
-    """
-
+  
 
     def save_and_return(self,instance):
         instance.save()  # Sauvegarde l'instance dans la base de données

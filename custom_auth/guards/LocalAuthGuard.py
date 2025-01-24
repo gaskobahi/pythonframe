@@ -18,7 +18,7 @@ class LocalAuthGuard(BaseBackend):
         self.authLogService = authLogService
     userService=UserService()
     def authenticate(self,request):
-        authService = AuthService(request)
+        authService = AuthService()
         username = request.data.get('username')
         password = request.data.get('password')
         try:
@@ -28,34 +28,16 @@ class LocalAuthGuard(BaseBackend):
             username,
             settings.REQUEST_AUTH_METHOD_KEY
             )
-            setattr(request, settings.REQUEST_AUTH_LOG_KEY, auth_log)
+            setattr(request,settings.REQUEST_AUTH_LOG_KEY,auth_log)
             #authService = AuthService(request)
             """
             Authentifie un utilisateur en fonction de critères personnalisés.
             """
             # Rechercher l'utilisateur (par défaut, avec le nom d'utilisateur)
             userLogged = json.loads(self.userService.authenticate(username,password))
-            auth_user=authService.create_Auth_User_Form(userLogged)
-
+            auth_user=authService.create_Auth_User_Form(userLogged,auth_log)
             setattr(request, settings.REQUEST_AUTH_USER_KEY, auth_user)
 
-
-            # Vérifier le mot de passe
-            """ 
-               if authResponse:
-                    # Retourner l'utilisateur s'il est authentifié
-                    authlog=authService.create_authLog(authResponse)
-                    authuser = authService.validateUser(authResponse)
-                    loggeduser = self.get_user_by_username(username)
-                    loggeduser.authuser = authuser  # Add custom data if needed
-                    loggeduser.auth_log_id= authlog.id
-                    loggeduser.user = loggeduser
-                    loggeduser.authlog = authlog
-                    return loggeduser
-                else:
-                    return None
-            """
-            #return (user, None)
         except User.DoesNotExist:
             raise AuthenticationFailed('User not found')
     

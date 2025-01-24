@@ -32,6 +32,7 @@ class AuthLogService:
             auth_method=authMethod,
             user_agent=userAgent
         )
+
         return auth_log
     
     

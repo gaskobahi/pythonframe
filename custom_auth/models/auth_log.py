@@ -17,6 +17,7 @@ class AuthLog(CoreEntity):
     last_access_date = models.DateTimeField(null=True, verbose_name=("Dernière date d'accès"))
     user_agent = models.JSONField(null=True, verbose_name=("Agent utilisateur"))
     application_id = models.CharField(max_length=255, verbose_name=("Application ID"))
+    
     def __str__(self):
         return self.username
     

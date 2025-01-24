@@ -1,4 +1,3 @@
-from requests import Response
 from rest_framework.permissions import BasePermission
 from rest_framework.exceptions import AuthenticationFailed
 from django.conf import settings
@@ -6,6 +5,10 @@ import jwt
 
 from custom_auth.definitions.constants import AUTH_HEADER_TYPES, AUTH_USER_JWT_HEADER
 from custom_auth.models.BlacklistedToken import BlacklistedToken
+from custom_auth.models.auth_log import AuthLog
+from custom_auth.models.auth_user import AuthUser
+from custom_auth.serializers.auth_user import AuthUserSerializer
+from custom_auth.services.auth_service import AuthService
 from user.models.user import User
 
 
@@ -49,21 +52,46 @@ class CustomIsAuthenticated(BasePermission):
 
         # Validate user existence
         try:
-            user = User.objects.get(id=user_id)
-            request.user = user
+            #user = User.objects.get(id=user_id)
+            #request.user = user
             user_session = decoded_token.get(settings.TOKEN_USER_SESSION)
             # Attach user to the request for further processing
             request.authUser = user_session
-
         except User.DoesNotExist:
             raise AuthenticationFailed("Utilisateur introuvable.")
 
         # Blacklist the token (optional, if needed)
         if  request.path == '/api/auth/logout/':
             BlacklistedToken.objects.create(token=token)
-       
+        
+        #Process authLog from JWT
+        authLog = AuthLog.objects.get(id=user_session.get('auth_log'))
+        request.authLog=authLog
+        if not authLog:
+            raise AuthenticationFailed("Utilisateur introuvable.")
+        else:
+            self.checkAuthLog(authLog)
+        
+         #Process authUser from JWT
+        authUser = AuthUser.objects.get(id=user_session.get('id'))
+        authUserSerializer=AuthUserSerializer(authUser).data
+        if  not authUserSerializer.get('is_active'):
+            raise AuthenticationFailed("Session inactive")
+        else:
+            self.checkAuthUser(authUserSerializer)
+        
+
+
+
         return True
         
 
     
 
+    def checkAuthLog(self,authLog: AuthLog):
+        if authLog.is_denied:
+            raise AuthenticationFailed("Requête d'authentification non autorisée.")
+
+    def checkAuthUser(self,authLog: AuthUser):
+        if  not authLog.get('user').get('is_active'):
+            raise AuthenticationFailed("Compte inactif")
