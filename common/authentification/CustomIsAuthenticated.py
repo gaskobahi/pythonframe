@@ -8,7 +8,6 @@ from custom_auth.models.BlacklistedToken import BlacklistedToken
 from custom_auth.models.auth_log import AuthLog
 from custom_auth.models.auth_user import AuthUser
 from custom_auth.serializers.auth_user import AuthUserSerializer
-from custom_auth.services.auth_service import AuthService
 from user.models.user import User
 
 

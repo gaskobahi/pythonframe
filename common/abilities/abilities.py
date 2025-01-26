@@ -1,28 +1,17 @@
-from .enums import AbilityActionEnum, AbilitySubjectEnum
+import json
+from typing import Dict, Any
 
+from base.enums import AbilityActionEnum, AbilitySubjectEnum
 
 def define_abilities_for(user):
-    print('sdsdsdsdsd',user)
-    """
-    Génère les règles d'abilities pour un utilisateur donné.
-    """
-    # Exemple de structure des permissions
-    permissions = {
-        "Article": {"read": True, "create": True, "delete": False},
-        "Branch": True,  # L'utilisateur peut tout faire sur "Branch"
-    }
-
-    field_permissions = {
-        "Article": ["title", "content"],  # Champs accessibles
-    }
-
     admin_permission = user.get('is_superuser')
     # Génère les règles
     rules = build_ability_rules(user.get('role').get('permissions'), user.get('role').get('field_permissions'), admin_permission)
-    return rules
+
+    return {"can":rules}
 
 
-def build_ability_rules(permissions:object={}, field_permissions=None, admin_permission=False):
+def build_ability_rules(permissions, field_permissions=None, admin_permission=False):
     """
     Génère des règles CASL-friendly basées sur les permissions et d'autres paramètres.
 
@@ -31,8 +20,10 @@ def build_ability_rules(permissions:object={}, field_permissions=None, admin_per
     :param admin_permission: Booléen indiquant si l'utilisateur a des permissions administratives.
     :return: Liste de règles CASL-friendly.
     """
-    rules = []
-    
+
+    rules :Dict= []
+    #rules:Dict[str, Dict[str, bool]]
+    #rules = abilityTransform(permissions)
     # Parcourt les permissions générales
     for subject, actions in permissions.items():
         if actions is True:  # Si "all" est autorisé pour le sujet
@@ -45,9 +36,8 @@ def build_ability_rules(permissions:object={}, field_permissions=None, admin_per
                     rule = apply_field_permissions(rule, field_permissions)
                     rules.append(rule)
 
-    # Appliquer les permissions d'admin si définies
-    rules = apply_admin_permission(rules, admin_permission)
-    print('dsdsdddsd',admin_permission)
+            # Appliquer les permissions d'admin si définies
+            rules = apply_admin_permission(rules, admin_permission)
 
     return rules
 
@@ -79,3 +69,30 @@ def apply_admin_permission(rules, admin_permission):
     if admin_permission:
         rules.append({"action": AbilityActionEnum.manage, "subject": AbilitySubjectEnum.all})
     return rules
+    
+    # Transform to the desired structure
+
+def abilityTransform(rules: Dict[str, Dict[str, bool]]) -> Dict[str, Any]:
+    """
+    Transforme un dictionnaire de permissions en une structure de type "can".
+    
+    :param rules: Un dictionnaire où chaque clé est un sujet (par ex. 'User', 'Product'),
+                  et la valeur est un dictionnaire de permissions pour chaque action.
+                  Exemple: {'User': {'read': True, 'create': False}, ...}
+    :return: Un dictionnaire formaté avec une clé "can" contenant la liste des actions permises.
+    """ 
+    # Validation basique pour vérifier que `rules` est un dictionnaire
+    if not isinstance(rules, dict):
+        raise ValueError("Le paramètre 'rules' doit être un dictionnaire.")
+    
+    transformed = {
+        "can": [
+            {"action": action, "subject": subject}
+            for subject, actions in rules.items()  # Boucle à travers chaque sujet (User, Branch, etc.)
+            if isinstance(actions, dict)  # Assurez-vous que les actions sont bien un dictionnaire
+            for action, is_allowed in actions.items()  # Boucle à travers les actions
+            if is_allowed  # Inclure uniquement les actions marquées comme True
+        ]
+    }
+    
+    return transformed

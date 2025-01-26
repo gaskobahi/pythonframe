@@ -1,7 +1,7 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from base.abilities import define_abilities_for
 from common.authentification.CustomIsAuthenticated import CustomIsAuthenticated
+from common.abilities.abilities import define_abilities_for
 
 class AbilityRulesView(APIView):
     """

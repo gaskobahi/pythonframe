@@ -5,6 +5,7 @@ from django.conf import settings
 from rest_framework.response import Response
 from rest_framework.exceptions import AuthenticationFailed
 
+from common.abilities.abilities import define_abilities_for
 from custom_auth.models.auth_log import AuthLog
 from custom_auth.models.auth_user import AuthUser
 from custom_auth.serializers.auth_user import AuthUserSerializer
@@ -86,11 +87,11 @@ class AuthService:
         authUser:AuthUser =self.save_and_return(authUser)
         #Reload auth user data
         authUser=json.loads(self.getCurrentUser(authUser)) 
-        authUserSerial=AuthUserSerializer(authUser)
+        #authUserSerial=AuthUserSerializer(authUser)
         #Update request auth data
         setattr(self.request,settings.REQUEST_AUTH_LOG_KEY,authLog) 
         setattr(self.request,settings.REQUEST_AUTH_USER_KEY,authUser)
-  
+
         refresh = CustomToken.for_user(self.request,authUser,authLog)
         session = authUser 
         user = User.objects.get(id=authUser.get('user_id'))
@@ -99,12 +100,15 @@ class AuthService:
         # Update last authentication
         user.last_access_id = authUser.get('id')
         setattr(self.request,settings.SIMPLE_JWT.get('USER_ID_CLAIM'),_user.data)
-         
+        #get user ability
+        abilities = define_abilities_for(authUser.get('user'))
+
         user.save();
         return Response({
             #'refresh': str(refresh),
             'session':session,
-            'token':str(refresh)      
+            'abilities':abilities['can'],     
+            'token':str(refresh)
         }, status=status.HTTP_200_OK)
 
     def logout(self,authUser):

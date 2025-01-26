@@ -2,10 +2,10 @@ from django.shortcuts import get_object_or_404
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
-from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework.exceptions import NotFound
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
+
+from base.enums import AbilityActionEnum
 
 class BaseListCreateAPIView:
     """
@@ -16,6 +16,31 @@ class BaseListCreateAPIView:
     serializer_class = None
     filterset_class = None
     pagination_class = PageNumberPagination
+
+    
+    resource_action_map = {
+        "GET": AbilityActionEnum.read,  # Maps HTTP methods to actions
+        "POST": AbilityActionEnum.create
+    }
+
+    @property
+    def resource_subject(self):
+        """
+        Retrieve the resource name dynamically based on the serializer class.
+        """
+        if self.serializer_class and hasattr(self.serializer_class.Meta, "model"):
+            # Use the model's name if defined in the serializer's Meta class
+            return self.serializer_class.Meta.model.__name__
+        elif self.serializer_class:
+            # Fallback: Use the serializer class name
+            return self.serializer_class.__name__.replace("Serializer", "")
+        return None  # Default fallback if no serializer is defined
+
+    def get_resource_action(self):
+        # Gracefully handle cases where request or method might not exist
+        if not hasattr(self, 'request') or not getattr(self.request, 'method', None):
+            return None
+        return self.resource_action_map.get(self.request.method, None)
 
     def get_queryset(self):
         """
@@ -72,7 +97,7 @@ class BaseListCreateAPIView:
         serializer = self.serializer_class(data=request.data)
         if serializer.is_valid():
             serializer.save()
-            return Response({"message": "POST endpoint"},serializer.data, status=status.HTTP_201_CREATED)
+            return Response({"message": "POST endpoint","data":serializer.data}, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -86,6 +111,30 @@ class BaseDetailAPIView:
     queryset = None
     serializer_class = None
     lookup_field = 'pk'  # Par défaut, utilise la clé primaire
+    resource_action_map = {
+        "GET": AbilityActionEnum.read,  # Maps HTTP methods to actions
+        "POST":AbilityActionEnum.create,
+        "PATCH":AbilityActionEnum.edit,
+        "PUT":AbilityActionEnum.edit,
+        "DELETE":AbilityActionEnum.delete
+    }
+
+    @property
+    def resource_subject(self):
+        """
+        Retrieve the resource name dynamically based on the serializer class.
+        """
+        if self.serializer_class and hasattr(self.serializer_class.Meta, "model"):
+            # Use the model's name if defined in the serializer's Meta class
+            return self.serializer_class.Meta.model.__name__
+        elif self.serializer_class:
+            # Fallback: Use the serializer class name
+            return self.serializer_class.__name__.replace("Serializer", "")
+        return None  # Default fallback if no serializer is defined
+    
+    def get_resource_action(self):
+        return self.resource_action_map.get(self.request.method, None)
+
     def get_queryset(self):
         """
         Retourne le queryset ou lève une exception si absent.

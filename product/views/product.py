@@ -4,6 +4,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.decorators import api_view
 
+from common.abilities.AbilityPermission import AbilityPermission
+from common.authentification.CustomIsAuthenticated import CustomIsAuthenticated
 from common.pagination import PaginationPersonnalise
 from common.views.bases import BaseDetailAPIView, BaseListCreateAPIView
 from product.models.product import Product
@@ -11,12 +13,14 @@ from product.filters.product import ProductFilter
 from product.serializers.product import ProductSerializer
 
 class ProductListCreateView(APIView,BaseListCreateAPIView):
+    permission_classes = [CustomIsAuthenticated,AbilityPermission]
     serializer_class = ProductSerializer
     filterset_class = ProductFilter
     pagination_class = PaginationPersonnalise
 
 
 class ProductDetailView(APIView,BaseDetailAPIView):
+    permission_classes = [CustomIsAuthenticated,AbilityPermission]
     queryset = Product.objects.all()
     serializer_class = ProductSerializer
     lookup_field = 'pk'  # Utilise le champ `id` pour rechercher un produit

@@ -1,9 +1,7 @@
 from django.conf import settings
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import ValidationError
-from django.contrib.auth.models import update_last_login
 from rest_framework import status
 
 from common.authentification.CustomIsAuthenticated import CustomIsAuthenticated
@@ -14,6 +12,7 @@ from user.models.user import User
 
 class ChangePasswordView(APIView):
     permission_classes = [CustomIsAuthenticated]
+   
 
     def post(self, request, *args, **kwargs):
         serializer = ChangePasswordSerializer(data=request.data)
