@@ -1,6 +1,7 @@
 from enum import Enum
 
 class AbilitySubjectEnum(str, Enum):
+    Role="Role"
     all = "all"
 
 
