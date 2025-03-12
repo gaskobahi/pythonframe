@@ -1,0 +1,102 @@
+# myapp/views.py
+from rest_framework.response import Response
+from drf_yasg.utils import swagger_auto_schema
+from drf_yasg import openapi
+from capro_data_analyse.settings import GOOGLE_AI_CLE_API_ICI
+from common.abilities.AbilityPermission import AbilityPermission
+from common.authentification.CustomIsAuthenticated import CustomIsAuthenticated
+from common.views.bases import BaseListCreateAPIView
+from ecc.serializers.ecc import EccSerializer
+from rest_framework.views import APIView
+from django.conf import settings  # Import settings to access env variables
+import google.generativeai as genai
+from rest_framework import status
+from rest_framework.decorators import api_view
+
+
+from ecc.serializers.stock_movement import StockMovementSerializer
+from ecc.serializers.stock_movement_ai import Stock_Movement_AiSerializer
+from transformers import pipeline
+
+
+
+class StockMovementAiView(APIView,BaseListCreateAPIView):
+    serializer_class = EccSerializer
+    permission_classes = [CustomIsAuthenticated,AbilityPermission]
+    GOOGLE_AI_CLE_API_ICI=settings.GOOGLE_AI_CLE_API_ICI
+    @swagger_auto_schema(
+        operation_description="Analyse des mouvements de stock avec filtres",
+        manual_parameters=[
+            openapi.Parameter('start_date', openapi.IN_QUERY, description="debut Année d'analyse", type=openapi.TYPE_STRING),
+            openapi.Parameter('end_date', openapi.IN_QUERY, description="fin Année d'analyse", type=openapi.TYPE_STRING),
+            openapi.Parameter('article_number', openapi.IN_QUERY, description="Numéro d'article à inclure", type=openapi.TYPE_STRING),
+            openapi.Parameter('variant_code', openapi.IN_QUERY, description="Code variant à inclure", type=openapi.TYPE_STRING),
+            openapi.Parameter('type_ecriture', openapi.IN_QUERY, description="Type d'écriture à inclure", type=openapi.TYPE_STRING),
+        ],
+        responses={200:''}
+    )
+    
+
+    
+    def post(self, request, *args, **kwargs):
+        genai.configure(api_key="AIzaSyC5Ecl3Hrx9sUMwe45l1cAR-pupxvFh678")
+        try:
+            serializer = Stock_Movement_AiSerializer(data=request.data)
+            if serializer.is_valid():
+                validated_data = serializer.validated_data
+                question = validated_data.get('question', '')  # Default to empty string if missing
+                stock_table = validated_data.get('stock_table', [])
+
+                # Check if stock_table is empty
+                if not stock_table:
+                    return Response({"error": "Données de stock non fournies"}, status=status.HTTP_400_BAD_REQUEST)
+
+                # Construct AI prompt
+                prompt = "📊 **Analyse des mouvements de stock :**\n\n"
+                for stock_item in stock_table:
+                    variant_code = stock_item.get("variant_code", "N/A")
+                    article_number = stock_item.get("article_number", "N/A")
+                    start_date = stock_item.get("start_date", "N/A")
+                    end_date = stock_item.get("end_date", "N/A")
+                    data_entries = stock_item.get("data", [])
+
+                    prompt += f"📌 **Code Variant** : {variant_code}\n"
+                    prompt += f"📌 **Article** : {article_number}\n"
+                    prompt += f"📌 **Date début analyse** : {start_date}\n"
+                    prompt += f"📌 **Date fin analyse** : {end_date}\n\n"
+
+                    for entry in data_entries:
+                        prompt += (
+                            f"📅 Mois: {entry.get('mois', 'N/A')}, "
+                            f"📦 Stock initial: {entry.get('stock_initial', 'N/A')}, "
+                            f"🛒 Achat: {entry.get('achat', 'N/A')}, "
+                            f"🏭 Production: {entry.get('production', 'N/A')}, "
+                            f"🔥 Consommation: {entry.get('consommation', 'N/A')}, "
+                            f"🛍️ Vente: {entry.get('vente', 'N/A')}, "
+                            f"➕ Ajustement positif: {entry.get('ajustement_positif', 'N/A')}, "
+                            f"➖ Ajustement négatif: {entry.get('ajustement_negatif', 'N/A')}, "
+                            f"📊 Stock final: {entry.get('stock_final', 'N/A')}\n"
+                        )
+                    prompt += "\n"
+
+                # Append the question to the prompt
+                prompt += f"➡️ **Question**: {question}\n"
+
+                # Debug print (remove in production)
+                """print("Generated Prompt:", prompt)
+
+                # Send request to Google AI (Gemini)
+                model = genai.GenerativeModel("gemini-pro")
+                response = model.generate_content(prompt)"""
+                        # Utilisez un modèle de génération de texte
+                generator = pipeline('text-generation', model='gpt2')
+
+                response = generator(prompt, max_length=50)
+                print(response)
+                # Return the AI-generated response
+                return Response({"response": response.text}, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+

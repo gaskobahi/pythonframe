@@ -12,3 +12,5 @@ python3 manage.py makemigrations
 pip install django-filter
 
 logger4js
+
+python manage.py makemigrations

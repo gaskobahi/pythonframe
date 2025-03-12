@@ -1,0 +1,280 @@
+# myapp/views.py
+from datetime import datetime
+from collections import defaultdict
+from django.db.models.functions import Cast, ExtractYear, ExtractMonth, Concat
+from django.db.models import Sum, Value, CharField,DateField
+from rest_framework import status
+import numpy as np
+from regex import F
+from rest_framework.response import Response
+from drf_yasg.utils import swagger_auto_schema
+from drf_yasg import openapi
+from common.abilities.AbilityPermission import AbilityPermission
+from common.authentification.CustomIsAuthenticated import CustomIsAuthenticated
+from common.views.bases import BaseListCreateAPIView
+from ecc.models.ecc import Ecc
+from ecc.serializers.ecc import EccSerializer
+from ecc.serializers.stock_movement import StockMovementSerializer
+from rest_framework.views import APIView
+from rest_framework.decorators import api_view
+from django.db.models.functions import Abs,Round,Coalesce
+from django.db.models import Sum, Case, When, Value, IntegerField,Count,F,Avg,FloatField,Func,Q,Max,Subquery
+# Custom function to replace ',' with '.'
+
+class ReplaceComma(Func):
+    function = "REPLACE"
+    template = "%(function)s(%(expressions)s, ',', '.')"
+
+# Custom function to remove spaces
+class RemoveSpaces(Func):
+    function = "REPLACE"
+    template = "%(function)s(%(expressions)s, ' ', '')"
+
+class StockMovementView(APIView,BaseListCreateAPIView):
+    serializer_class = EccSerializer
+    permission_classes = [CustomIsAuthenticated,AbilityPermission]
+
+    @swagger_auto_schema(
+        method='get',
+        operation_description="Analyse des mouvements de stock avec filtres",
+        manual_parameters=[
+            openapi.Parameter('start_date', openapi.IN_QUERY, description="debut Année d'analyse", type=openapi.TYPE_STRING),
+            openapi.Parameter('end_date', openapi.IN_QUERY, description="fin Année d'analyse", type=openapi.TYPE_STRING),
+            openapi.Parameter('article_number', openapi.IN_QUERY, description="Numéro d'article à inclure", type=openapi.TYPE_STRING),
+            openapi.Parameter('variant_code', openapi.IN_QUERY, description="Code variant à inclure", type=openapi.TYPE_STRING),
+            openapi.Parameter('type_ecriture', openapi.IN_QUERY, description="Type d'écriture à inclure", type=openapi.TYPE_STRING),
+        ],
+        responses={200:  StockMovementSerializer(many=True)}
+    )
+    
+
+    @api_view(['GET'])
+    def get_stockmovement(request, *args, **kwargs):
+
+        # 📌 Get query parameters with defaults
+        today = datetime.today()
+        start_date = request.GET.get('start_date', today.replace(month=12, day=31, year=today.year - 1).strftime('%Y-%m-%d'))
+        end_date = request.GET.get('end_date', today.strftime('%Y-%m-%d'))
+        article_numbers = request.GET.getlist('article_number')  # Ensure list format
+        type_ecriture = request.GET.getlist('type_ecriture')  # Ensure list format
+        variant_code = request.GET.get('variant_code')
+
+        # 🔹 Filter dataset from database
+        queryset = Ecc.objects.annotate(date_as_date=Cast('accounting_date', DateField()))
+        # ✅ Get stock history before `start_date`
+        historique_avant = queryset.filter(date_as_date__lt=start_date)
+        if article_numbers:
+            historique_avant = historique_avant.filter(article_number__in=article_numbers)
+        if variant_code:
+            historique_avant = historique_avant.filter(variant_code=variant_code)
+
+        # 🔹 Compute initial stock per article
+        transaction_types = {
+            'positive': ['Achat', 'Positif (ajust.)', 'Production'],
+            'negative': ['Consommation', 'Vente', 'Négatif (ajust.)']
+        }
+        stock_initial_par_article = {
+            article: (
+                sum(historique_avant.filter(article_number=article, type_ecriture=typ).aggregate(Sum('quantity'))['quantity__sum'] or 0
+                    for typ in transaction_types['positive'])
+                - sum(abs(historique_avant.filter(article_number=article, type_ecriture=typ).aggregate(Sum('quantity'))['quantity__sum'] or 0)
+                    for typ in transaction_types['negative'])
+            )
+            for article in article_numbers
+        }
+
+        # 🔹 Apply filters for main dataset
+        queryset = queryset.filter(date_as_date__range=[start_date, end_date])
+        queryset = queryset.annotate(
+            year=Cast(ExtractYear('date_as_date'), CharField()),
+            month=Cast(ExtractMonth('date_as_date'), CharField()),
+            year_month=Concat('year', Value('-'), 'month')
+        )
+       
+        if article_numbers:
+            queryset = queryset.filter(article_number__in=article_numbers)
+        if variant_code:
+            queryset = queryset.filter(variant_code=variant_code)
+        if type_ecriture:
+            queryset = queryset.filter(type_ecriture__in=type_ecriture)
+
+        # 🔹 Aggregate and group data
+        data_grouped = queryset.values('article_number', 'type_ecriture', 'year_month').annotate(total_quantite=Sum('quantity')).order_by('year_month', 'type_ecriture')
+
+        # 🔹 Get unique months
+        mois_uniques = sorted(set(data_grouped.values_list('year_month', flat=True)), key=lambda x: (int(x[:4]), int(x[5:])))
+
+        # 📊 Compute stock per article
+        stock_table = defaultdict(list)
+        for mois in mois_uniques:
+            for article in article_numbers:
+                # Create a dict with transaction types and their quantities
+                data_mois = {item['type_ecriture']: item['total_quantite'] for item in data_grouped.filter(year_month=mois, article_number=article)}
+
+                # Calculate stock final
+                stock_initial = stock_initial_par_article[article]
+                stock_final = stock_initial + sum(data_mois.get(t, 0) for t in transaction_types['positive']) - sum(abs(data_mois.get(t, 0)) for t in transaction_types['negative'])
+
+                # Store data
+                stock_table[article].append({
+                    'mois': mois,
+                    'stock_initial': stock_initial,
+                    'achat': data_mois.get('Achat', 0),
+                    'production': data_mois.get('Production', 0),
+                    'consommation': data_mois.get('Consommation', 0),
+                    'ajustement_positif': data_mois.get('Positif (ajust.)', 0),
+                    'vente': data_mois.get('Vente', 0),
+                    'ajustement_negatif': data_mois.get('Négatif (ajust.)', 0),
+                    'stock_final': stock_final
+                })
+
+                # Update stock for next month
+                stock_initial_par_article[article] = stock_final
+
+        # 📌 Prepare final response
+        resultat_final = [
+            {
+                'article_number': article,
+                'variant_code': variant_code,
+                'start_date': start_date,
+                'end_date': end_date,
+                'data': data
+            }
+            for article, data in stock_table.items()
+        ]
+
+        # Serialize and return response
+        serializer = StockMovementSerializer(resultat_final, many=True)
+        return Response(serializer.data)
+    
+
+
+
+    @swagger_auto_schema(
+            method='get',
+            operation_description="Analyse des stock par numero package filtres",
+            manual_parameters=[
+                openapi.Parameter('start_date', openapi.IN_QUERY, description="debut Année d'analyse", type=openapi.TYPE_STRING),
+                openapi.Parameter('end_date', openapi.IN_QUERY, description="fin Année d'analyse", type=openapi.TYPE_STRING),
+                openapi.Parameter('article_number', openapi.IN_QUERY, description="Numéro d'article à inclure", type=openapi.TYPE_STRING),
+                openapi.Parameter('variant_code', openapi.IN_QUERY, description="Code variant à inclure", type=openapi.TYPE_STRING),
+                openapi.Parameter('type_ecriture', openapi.IN_QUERY, description="Type d'écriture à inclure", type=openapi.TYPE_STRING),
+                openapi.Parameter('package_lot', openapi.IN_QUERY, description="Numero de package/lot", type=openapi.TYPE_STRING),
+            ],
+            responses={200:  StockMovementSerializer(many=True)}
+        )
+    @api_view(['GET'])
+    def get_by_package_number(request, *args, **kwargs):
+    # 📌 Get query parameters with defaults
+        today = datetime.today()
+        start_date = request.GET.get('start_date', today.replace(month=12, day=31, year=today.year - 1).strftime('%Y-%m-%d'))
+        end_date = request.GET.get('end_date', today.strftime('%Y-%m-%d'))
+        article_numbers = request.GET.get('article_number')  # Ensure list format
+        type_ecriture = request.GET.get('type_ecriture')  # Ensure list format
+        variant_code = request.GET.get('variant_code')
+        package_lot=request.GET.get('package_lot')
+        
+            
+        queryset = Ecc.objects.annotate(
+            package_lot=Case(
+                When(~Q(package_number=""), then=F('package_number')),
+                When(~Q(lot_number=""), then=F('lot_number')),
+                default=None,
+                output_field=CharField(),
+            ),
+            date_as_date=Cast('accounting_date', DateField()),
+            quantity_in_bag=Cast(F('quantity_in_sac'), FloatField())
+        ).filter(package_lot__isnull=False)
+            # 🔹 Filter dataset from database
+        #queryset = queryset.annotate(date_as_date=Cast('accounting_date', DateField()))
+        queryset = queryset.annotate(quantity_in_bag=Cast(RemoveSpaces(F('quantity_in_sac')), FloatField()))
+        
+        # 🔹 Corriger et appliquer le filtre sur la date
+        # 🔹 Appliquer le filtre de date
+        queryset = queryset.filter(
+            Q(date_as_date__lte=start_date) |  # Tout ce qui précède start_date
+            Q(date_as_date__range=[start_date, end_date])  # Intervalle classique
+        )
+        #return Response(queryset.values(), status=status.HTTP_200_OK)
+
+        
+        if article_numbers:
+            queryset = queryset.filter(article_number=article_numbers)
+        if variant_code:
+            queryset = queryset.filter(variant_code=variant_code)
+        if type_ecriture:
+            queryset = queryset.filter(type_ecriture=type_ecriture)
+        if package_lot:
+            queryset = queryset.filter(package_lot=package_lot)
+        
+        transaction_types = {
+            'positive': ['Achat', 'Positif (ajust.)', 'Production'],
+            'negative': ['Consommation', 'Vente', 'Négatif (ajust.)']
+        }
+
+            # Agrégation des données par article
+        queryset = queryset.values("package_lot").annotate(
+                input=Sum(
+                    Case(
+                        When(type_ecriture__in=transaction_types['positive'], then=F('quantity')),
+                        default=Value(0),
+                        output_field=IntegerField()
+                    )
+                ),
+                output=Sum(
+                    Case(
+                        When(type_ecriture__in=transaction_types['negative'], then=F('quantity')),
+                        default=Value(0),
+                        output_field=IntegerField()
+                    )
+                ),
+                quantity=Coalesce(
+                    Sum(
+                        Case(
+                            When(type_ecriture__in=transaction_types['positive'], then=F('quantity')),
+                            When(type_ecriture__in=transaction_types['negative'], then=F('quantity')),
+                            default=Value(0),
+                            output_field=IntegerField()
+                        )
+                    ), Value(0)
+                ),
+                input_bag=Sum(
+                    Case(
+                        When(type_ecriture__in=transaction_types['positive'], then=F('quantity_in_bag')),
+                        default=Value(0),
+                        output_field=FloatField()
+                    )
+                ),
+                output_bag=Sum(
+                    Case(
+                        When(type_ecriture__in=transaction_types['negative'], then=-F('quantity_in_bag')),
+                        default=Value(0),
+                        output_field=FloatField()
+                    )
+                ),
+                quantite_sac=Sum("quantity_in_bag"),
+                kor_reception=Round(Avg("kor_by_reception"), 2),
+            )
+        
+        
+        # 📌 Prepare final response
+        resultat_final = [
+            {
+                'package_lot':package_lot,
+                'variant_code': variant_code,
+                'article_number':article_numbers,
+                'type_ecriture':type_ecriture,
+                'start_date': start_date,
+                'end_date': end_date,
+                'data': queryset
+            }
+        ]
+
+        # Serialize and return response
+        serializer = StockMovementSerializer(resultat_final, many=True)
+        return Response(serializer.data)
+    
+
+
+
+    

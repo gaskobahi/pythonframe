@@ -7,7 +7,6 @@ def define_abilities_for(user):
     admin_permission = user.get('is_superuser')
     # Génère les règles
     rules = build_ability_rules(user.get('role').get('permissions'), user.get('role').get('field_permissions'), admin_permission)
-
     return {"can":rules}
 
 
